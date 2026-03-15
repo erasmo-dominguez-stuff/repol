@@ -1,10 +1,11 @@
 # governant
 
-**Policy as Code para el ciclo de vida de desarrollo en GitHub.**
+**Policy as Code for the GitHub software development lifecycle.**
 
-governant permite a equipos de plataforma y seguridad definir, testear y aplicar reglas de deployment y pull request en sus repositorios de GitHub — todo como políticas Rego versionadas evaluadas por [Open Policy Agent](https://www.openpolicyagent.org/).
+governant lets platform and security teams define, test, and enforce deployment and pull-request rules across their GitHub repositories — all as versioned [Rego](https://www.openpolicyagent.org/docs/latest/policy-language/) policies evaluated by [Open Policy Agent](https://www.openpolicyagent.org/).
 
-El nombre del proyecto viene de **repo[l]** → **governant**: gobernar repositorios mediante políticas declarativas.
+> The name **governant** reflects the project's goal: _governing_ repositories through declarative policies.
+> The `.repol/` configuration directory stands for **repo policies** — the per-repo rules that teams own and edit.
 
 [![OPA](https://img.shields.io/badge/OPA-v1.x-blue?logo=openpolicyagent)](https://www.openpolicyagent.org/)
 [![Rego v1](https://img.shields.io/badge/Rego-v1-4a90e2)](https://www.openpolicyagent.org/docs/latest/policy-language/)
@@ -16,31 +17,57 @@ El nombre del proyecto viene de **repo[l]** → **governant**: gobernar reposito
 
 | Policy | Package | Purpose |
 |--------|---------|---------|
-| **Deployment Protection** | `github.deploy` | Enforces rules when deploying to protected environments (approvals, allowed branches, tests, sign-off, rate limit) |
-| **Pull Request** | `github.pullrequest` | Enforces rules on pull requests before merge (approvals, allowed branches, sign-off) |
+| **Deployment Protection** | `github.deploy` | Enforces rules when deploying to protected environments |
+| **Pull Request** | `github.pullrequest` | Enforces rules on pull requests before merge |
 
 Both policies share common helper functions in `policies/lib/helpers.rego`.
+
+### Deployment Protection checks
+
+- Input and policy schema validation
+- Environment exists and is enabled
+- Branch is in the allowed list for the target environment
+- Minimum approvals met
+- CI tests passed
+- DCO sign-off present
+- Daily deployment rate limit
+
+### Pull Request checks
+
+- Policy configuration present and valid
+- Branch naming convention matches (source → target mapping)
+- Target branch is in the allowed list
+- Minimum approvals met
+- DCO sign-off present
 
 ---
 
 ## How It Works
 
+Each policy follows the same pattern:
+
+1. **Team configuration** — YAML files in `.repol/` declare per-environment rules: required approvals, allowed branches, sign-off, rate limits, etc.
+2. **Schema validation** — JSON Schemas in `schemas/` validate the configuration structure.
+3. **Rego evaluation** — The policy evaluates `input` against the configuration and produces `allow` (boolean) and `violations` (set of `{code, msg}` objects).
+
+### Two modes of operation
+
+**CI/CD mode** — GitHub Actions workflows evaluate policies on every push and PR using a reusable composite action (`.github/actions/eval-policy/`). No server required.
+
+**Webhook mode** — A FastAPI server receives GitHub `deployment_protection_rule` events, evaluates the policy via OPA, records an audit trail, and calls back to GitHub to approve or reject the deployment. Authenticated as a GitHub App (JWT + installation token, no PAT).
+
 ```
+GitHub (deployment_protection_rule)
+         │
+         ▼
 ┌─────────────────┐     ┌─────────────────┐     ┌──────────┐
-│  GitHub webhook  │────▶│  Policy Server  │────▶│   OPA    │
-│  (or CI action)  │     │  (FastAPI:8080) │     │  (:8181) │
+│  smee.io relay  │────▶│  Policy Server  │────▶│   OPA    │
+│  (webhook tunnel)│     │  (FastAPI:8080) │     │  (:8181) │
 └─────────────────┘     └────────┬────────┘     └──────────┘
                                  │
                          GitHub API callback
                          (approve / reject)
 ```
-
-1. **Team configuration** — YAML files in `.repol/` declare per-environment rules: required approvals, allowed branches, sign-off, rate limits, etc.
-2. **Schema validation** — JSON Schemas in `schemas/` validate the configuration structure.
-3. **Rego evaluation** — The policy evaluates `input` against the configuration and produces `allow` (boolean) and `violations` (set of `{code, msg}` objects).
-4. **GitHub callback** — For deployment protection rules, the server calls back to GitHub to approve or reject the deployment.
-
-The server authenticates to GitHub as a **GitHub App** (JWT + installation token). No PAT required.
 
 ---
 
@@ -50,14 +77,14 @@ The server authenticates to GitHub as a **GitHub App** (JWT + installation token
 .devcontainer/               # Dev Container (recommended dev environment)
 .github/
   actions/eval-policy/       # Composite action for CI
-  workflows/                 # CI/CD workflows
-.repol/                      # Policy YAML configs (teams edit these)
-  pullrequest.yaml           # PR validation rules + branch naming
-  deploy.yaml                # Deployment protection rules per environment
+  workflows/                 # CI/CD workflows (PR check, deploy check, release)
+.repol/                      # Repo policies — YAML configs teams edit
+  pullrequest.yaml           # PR rules: branch naming, approvals, sign-off
+  deploy.yaml                # Deploy rules per environment (prod, staging, dev)
 infra/
   local/                     # Local testing (Docker Compose: OPA + server)
   integration/               # Integration testing with real GitHub webhooks
-  server/                    # Shared FastAPI server (OPA client, audit trail, GitHub auth)
+  server/                    # Shared FastAPI server (OPA client, audit, GitHub auth)
   smee/                      # smee.io relay container (webhook tunnel)
 policies/
   lib/helpers.rego           # Shared helper functions
@@ -140,4 +167,4 @@ make lint test    # run all checks
 
 ---
 
-MIT © 2025 Erasmo Domínguez
+MIT © 2026 Erasmo Domínguez
