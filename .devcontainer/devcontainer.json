@@ -1,5 +1,5 @@
 {
-  "name": "repol",
+  "name": "governant",
   "image": "mcr.microsoft.com/devcontainers/base:ubuntu-22.04",
   "features": {
     "ghcr.io/devcontainers/features/python:1": {
@@ -30,10 +30,7 @@
       }
     }
   },
-  "postCreateCommand": "pip install -e '.[dev,poc]' && echo '✅ repol dev environment ready'",
-  "remoteEnv": {
-    "PYTHONPATH": "src:."
-  },
+  "postCreateCommand": "pip install -e '.[dev]' && pre-commit install && echo '✅ governant dev environment ready'",
   "mounts": [
     "source=${localWorkspaceFolder},target=/workspace,type=bind"
   ],

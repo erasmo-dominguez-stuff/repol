@@ -20,7 +20,7 @@ The policy server is a modular FastAPI app shared at `infra/server/app/`:
 ```
 infra/server/app/
 ├── __init__.py          # App assembly (creates FastAPI, includes routers)
-├── config.py            # Settings (OPA_URL, REPOL_DIR, GITHUB_TOKEN)
+├── config.py            # Settings (OPA_URL, REPOL_DIR, GitHub App credentials)
 ├── opa.py               # OPA REST client
 ├── github.py            # GitHub deployment callback client
 ├── audit.py             # SQLite audit trail storage

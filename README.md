@@ -1,8 +1,10 @@
 # governant
 
-**Governance as Code for GitHub repositories.**
+**Policy as Code para el ciclo de vida de desarrollo en GitHub.**
 
-governant gives platform and security teams a single place to define, test, and enforce deployment and pull-request rules across their GitHub repositories — all as versioned Rego policies evaluated by [Open Policy Agent](https://www.openpolicyagent.org/).
+governant permite a equipos de plataforma y seguridad definir, testear y aplicar reglas de deployment y pull request en sus repositorios de GitHub — todo como políticas Rego versionadas evaluadas por [Open Policy Agent](https://www.openpolicyagent.org/).
+
+El nombre del proyecto viene de **repo[l]** → **governant**: gobernar repositorios mediante políticas declarativas.
 
 [![OPA](https://img.shields.io/badge/OPA-v1.x-blue?logo=openpolicyagent)](https://www.openpolicyagent.org/)
 [![Rego v1](https://img.shields.io/badge/Rego-v1-4a90e2)](https://www.openpolicyagent.org/docs/latest/policy-language/)
@@ -12,44 +14,60 @@ governant gives platform and security teams a single place to define, test, and 
 
 ## Policies
 
-governant currently implements two policies:
-
 | Policy | Package | Purpose |
 |--------|---------|---------|
-| **Deployment Protection** | `github.deploy` | Enforces rules when deploying to protected environments (approvals, branches, tickets, tests, sign-off, rate limit) |
+| **Deployment Protection** | `github.deploy` | Enforces rules when deploying to protected environments (approvals, allowed branches, tests, sign-off, rate limit) |
 | **Pull Request** | `github.pullrequest` | Enforces rules on pull requests before merge (approvals, allowed branches, sign-off) |
 
-Both policies share common helper functions located in `policies/lib/helpers.rego`.
+Both policies share common helper functions in `policies/lib/helpers.rego`.
+
+---
+
+## How It Works
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌──────────┐
+│  GitHub webhook  │────▶│  Policy Server  │────▶│   OPA    │
+│  (or CI action)  │     │  (FastAPI:8080) │     │  (:8181) │
+└─────────────────┘     └────────┬────────┘     └──────────┘
+                                 │
+                         GitHub API callback
+                         (approve / reject)
+```
+
+1. **Team configuration** — YAML files in `.repol/` declare per-environment rules: required approvals, allowed branches, sign-off, rate limits, etc.
+2. **Schema validation** — JSON Schemas in `schemas/` validate the configuration structure.
+3. **Rego evaluation** — The policy evaluates `input` against the configuration and produces `allow` (boolean) and `violations` (set of `{code, msg}` objects).
+4. **GitHub callback** — For deployment protection rules, the server calls back to GitHub to approve or reject the deployment.
+
+The server authenticates to GitHub as a **GitHub App** (JWT + installation token). No PAT required.
 
 ---
 
 ## Repository Layout
 
 ```
-├── .repol/                      # Team policy YAML configuration
-├── policies/
-│   ├── deploy.rego              # Deployment protection policy
-│   ├── pullrequest.rego         # Pull request policy
-│   ├── github_env_protect_policy.json
-│   ├── github_pull_request_policy.json
-│   ├── lib/
-│   │   └── helpers.rego         # Shared helper functions
-│   └── tests/
-│       ├── deploy_test.rego     # Deploy policy tests
-│       └── pullrequest_test.rego
-├── schemas/
-│   ├── github_env_protect_schema.json
-│   └── github_pull_request_schema.json
-├── scripts/
-│   ├── github-environment-protect-check.sh
-│   ├── github-pull-request-check.sh
-│   └── validate_schema.sh
-├── poc/                         # PoC webhook server (Flask)
-├── .github/
-│   ├── actions/eval-policy/     # Composite action for CI
-│   └── workflows/               # CI/CD workflows
-├── Makefile
-└── pyproject.toml
+.devcontainer/               # Dev Container (recommended dev environment)
+.github/
+  actions/eval-policy/       # Composite action for CI
+  workflows/                 # CI/CD workflows
+.repol/                      # Policy YAML configs (teams edit these)
+  pullrequest.yaml           # PR validation rules + branch naming
+  deploy.yaml                # Deployment protection rules per environment
+infra/
+  local/                     # Local testing (Docker Compose: OPA + server)
+  integration/               # Integration testing with real GitHub webhooks
+  server/                    # Shared FastAPI server (OPA client, audit trail, GitHub auth)
+  smee/                      # smee.io relay container (webhook tunnel)
+policies/
+  lib/helpers.rego           # Shared helper functions
+  pullrequest.rego           # PR policy (Rego v1)
+  deploy.rego                # Deploy policy (Rego v1)
+  tests/                     # OPA unit tests
+schemas/                     # JSON Schemas that validate .repol/ files
+scripts/                     # Utility scripts (schema validation)
+Makefile                     # All dev, test, and infra commands
+pyproject.toml               # Python project metadata
 ```
 
 ---
@@ -58,34 +76,29 @@ Both policies share common helper functions located in `policies/lib/helpers.reg
 
 ### Prerequisites
 
-- [OPA CLI](https://www.openpolicyagent.org/docs/latest/#running-opa) v1.x
-- `jq` (for schema validation fallback)
+- [OPA CLI](https://www.openpolicyagent.org/docs/latest/#running-opa) ≥ 1.9
+- Docker + Compose v2 (for local/integration testing)
 
 ### Validate & Test
 
 ```bash
-# Check Rego syntax
-opa check policies/
-
-# Run all tests
-opa test policies/ --ignore "*.json" -v
-
-# Validate policy JSON configs against schemas
-./scripts/validate_schema.sh
-
-# Or use make
-make lint    # check + fmt + schema validation
-make test    # run all OPA tests
+make lint    # opa check + opa fmt + schema validation
+make test    # run all OPA unit tests
 ```
 
 ### Evaluate Policies Locally
 
 ```bash
-# Deploy policy
-make eval-deploy
+make eval-deploy    # evaluate deploy policy with sample input
+make eval-pr        # evaluate PR policy with sample input
+```
 
-# PR policy
-make eval-pr
+### Run the Full Stack Locally
+
+```bash
+make local-up       # start OPA + policy server
+make local-test     # run integration tests
+make local-down     # stop services
 ```
 
 ### Build OPA Bundle
@@ -96,44 +109,33 @@ make build
 
 ---
 
-## How It Works
+## Infrastructure
 
-Each policy follows the same pattern:
+### Local testing (`infra/local/`)
 
-1. **Team configuration** — A JSON file (e.g., `github_env_protect_policy.json`) declares per-environment rules: required approvals, allowed branches, ticket requirements, etc.
-2. **Schema validation** — A JSON Schema validates the configuration structure.
-3. **Rego evaluation** — The policy evaluates `input` against the configuration and produces `allow` (boolean) and `violations` (set of `{code, msg}` objects).
+Runs OPA and the policy server in Docker for offline evaluation testing. See [infra/local/README.md](infra/local/README.md).
 
-### Deployment Protection (`github.deploy`)
+### Integration testing (`infra/integration/`)
 
-Checks performed:
-- Input and policy schema validation
-- Environment exists in repository
-- Branch is in the allowed list
-- Valid ticket reference (regex pattern)
-- Minimum approvals met
-- CI tests passed
-- DCO sign-off present
-- Daily deployment rate limit
+End-to-end testing with real GitHub `deployment_protection_rule` webhooks via a smee.io tunnel. Requires a GitHub App. See [infra/integration/README.md](infra/integration/README.md).
 
-### Pull Request (`github.pullrequest`)
+### Policy server (`infra/server/`)
 
-Checks performed:
-- Policy and environment exist
-- Environment exists in repository (configurable)
-- Branch is in the allowed list
-- Minimum approvals met
-- DCO sign-off present
+A modular FastAPI application shared by both environments:
+
+- **Webhook dispatcher** — routes GitHub events to the right handler
+- **OPA client** — evaluates policies against the OPA REST API
+- **Audit trail** — records every evaluation in SQLite
+- **GitHub auth** — GitHub App JWT authentication (no PAT)
 
 ---
 
 ## Contributing
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development guide, including devcontainer setup.
+
 ```bash
-make install      # Install Python dev dependencies
-make install-opa  # Install OPA CLI (macOS)
-make lint         # Run all linting checks
-make test         # Run all OPA tests
+make lint test    # run all checks
 ```
 
 ---
