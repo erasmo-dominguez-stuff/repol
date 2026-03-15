@@ -1,4 +1,4 @@
-FROM node:20-alpine
+FROM node
 
 RUN apk add --no-cache curl && \
     npm install -g smee-client && \
