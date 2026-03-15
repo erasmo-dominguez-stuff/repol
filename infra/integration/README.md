@@ -29,7 +29,7 @@ approve or reject the deployment.
 
 - Docker + Docker Compose
 - A GitHub repository with environments configured
-- A GitHub token with `repo` scope (classic) or `actions:write` (fine-grained)
+- A GitHub App **or** a GitHub token with `repo` scope (classic) or `actions:write` (fine-grained)
 
 ## Setup
 
@@ -93,8 +93,9 @@ make integration-down
 Check that `SMEE_URL` in `.env` points to a valid smee.io channel.
 
 **GitHub callback failing:**
-Check that `GITHUB_TOKEN` is set and has the correct scope. Look for
-`GitHub callback` log lines: `make integration-logs`.
+Check that `GITHUB_TOKEN` or GitHub App credentials (`GITHUB_APP_ID` +
+`GITHUB_APP_PRIVATE_KEY_FILE`) are set correctly. Look for `GitHub callback`
+log lines: `make integration-logs`.
 
 **Policy evaluation returning unexpected results:**
 Test directly: `curl -s http://localhost:8080/evaluate/deploy -d @infra/local/payloads/deploy_valid.json | jq .`

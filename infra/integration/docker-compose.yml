@@ -9,7 +9,7 @@ services:
 
   server:
     build:
-      context: ../local/server
+      context: ../server
     ports:
       - "8080:8080"
     environment:
@@ -17,9 +17,12 @@ services:
       REPOL_DIR: /repol
       AUDIT_DB: /data/audit.db
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_PRIVATE_KEY_PATH: ${GITHUB_APP_PRIVATE_KEY_PATH:-/secrets/app.pem}
     volumes:
       - ../../.repol:/repol:ro
       - audit-data:/data
+      - ${GITHUB_APP_PRIVATE_KEY_FILE:-/dev/null}:/secrets/app.pem:ro
     depends_on:
       - opa
 

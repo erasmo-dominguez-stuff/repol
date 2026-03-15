@@ -101,6 +101,7 @@ async def _handle_deploy(request: Request, event: dict) -> dict:
         ref = f"refs/heads/{ref}"
 
     callback_url = event.get("deployment_callback_url", "")
+    installation_id = (event.get("installation") or {}).get("id")
 
     repo_policy = _load_yaml("deploy.yaml")
     env_names = list(repo_policy.get("policy", {}).get("environments", {}).keys())
@@ -124,7 +125,11 @@ async def _handle_deploy(request: Request, event: dict) -> dict:
 
     if callback_url:
         await github_callback(
-            callback_url, resp["allow"], resp["violations"], resp["audit_id"]
+            callback_url,
+            resp["allow"],
+            resp["violations"],
+            resp["audit_id"],
+            installation_id=installation_id,
         )
         resp["callback_url"] = callback_url
         resp["callback_sent"] = True
