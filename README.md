@@ -455,6 +455,12 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development guide, including
 make lint test    # run all checks
 ```
 
+
+
+
+
+
+
 ---
 
 MIT © 2026 Erasmo Domínguez
