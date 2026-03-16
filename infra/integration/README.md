@@ -50,6 +50,11 @@ SMEE_URL=https://smee.io/<your-channel>
 # GitHub App credentials
 GITHUB_APP_ID=<your-app-id>
 GITHUB_APP_PRIVATE_KEY_FILE=./priv.pem
+
+# (Optional) Force extra approvers for integration testing.
+# GitHub does not allow self-approval, so set this to your own login
+# to validate the approved→pass flow without a second account.
+# PR_FORCE_APPROVERS=your-github-login
 ```
 
 The `SMEE_URL` must match the **Webhook URL** configured in the GitHub App settings.

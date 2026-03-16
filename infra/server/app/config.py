@@ -12,3 +12,10 @@ REPOL_DIR = Path(os.getenv("REPOL_DIR", ".repol"))
 
 GITHUB_APP_ID = os.getenv("GITHUB_APP_ID", "")
 GITHUB_APP_PRIVATE_KEY_PATH = os.getenv("GITHUB_APP_PRIVATE_KEY_PATH", "")
+
+# ── Integration testing ───────────────────────────────────────────────────────
+# Comma-separated list of GitHub logins to inject into PR approvers during
+# integration testing.  Has no effect when empty.  Useful when you cannot
+# approve your own PR on GitHub but still need to validate the approved→pass flow.
+_raw = os.getenv("PR_FORCE_APPROVERS", "")
+PR_FORCE_APPROVERS: list[str] = [u.strip() for u in _raw.split(",") if u.strip()]

@@ -18,6 +18,7 @@ services:
       AUDIT_DB: /data/audit.db
       GITHUB_APP_ID: ${GITHUB_APP_ID}
       GITHUB_APP_PRIVATE_KEY_PATH: /secrets/app.pem
+      PR_FORCE_APPROVERS: ${PR_FORCE_APPROVERS:-}
     volumes:
       - ../../.repol:/repol:ro
       - audit-data:/data

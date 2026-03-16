@@ -15,7 +15,7 @@ import logging
 import yaml
 from fastapi import APIRouter, HTTPException, Request
 
-from ..config import REPOL_DIR
+from ..config import PR_FORCE_APPROVERS, REPOL_DIR
 from ..github import get_pr_approvers, github_callback, github_check_run
 from ..helpers import record_audit
 from ..opa import query_opa
@@ -188,6 +188,13 @@ async def _handle_pr(request: Request, event: dict) -> dict:
         )
     else:
         approvers = _csv_header(request, "X-Approvers")
+
+    # PR_FORCE_APPROVERS: inject extra approvers for integration testing
+    # (works around GitHub self-approval restriction).
+    if PR_FORCE_APPROVERS:
+        merged = list({*approvers, *PR_FORCE_APPROVERS})
+        logger.info("PR_FORCE_APPROVERS active — merged approvers: %s", merged)
+        approvers = merged
 
     repo_policy = _load_yaml("pullrequest.yaml")
 
