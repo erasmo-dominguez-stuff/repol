@@ -151,3 +151,105 @@ async def github_callback(
     except Exception as exc:
         logger.error("GitHub callback failed: %s", exc)
         audit.update_callback(audit_id, status_code=0, state=f"error: {exc}")
+
+
+# ── Check Run (PR policy result) ──────────────────────────────────────────────
+
+
+async def github_check_run(
+    *,
+    repo_full_name: str,
+    head_sha: str,
+    allow: bool,
+    violations: list,
+    audit_id: str,
+    installation_id: Optional[int],
+):
+    """Create or update a GitHub Check Run with the PR policy result.
+
+    The check run name 'gitpoli / PR Policy' must be added as a required
+    status check in branch protection rules to block merging on deny.
+    """
+    auth = await _auth_header(installation_id)
+    if not auth:
+        logger.warning("No GitHub credentials — cannot post check run")
+        return
+
+    conclusion = "success" if allow else "failure"
+    title = "Policy passed" if allow else "Policy violations found"
+
+    if violations:
+        codes = ", ".join(v.get("code", "?") for v in violations)
+        summary = f"**Violations:** {codes}\n\n*audit_id: `{audit_id}`*"
+    else:
+        summary = f"All policy rules passed. *audit_id: `{audit_id}`*"
+
+    payload = {
+        "name": "gitpoli / PR Policy",
+        "head_sha": head_sha,
+        "status": "completed",
+        "conclusion": conclusion,
+        "output": {
+            "title": title,
+            "summary": summary,
+        },
+    }
+
+    url = f"{_GITHUB_API}/repos/{repo_full_name}/check-runs"
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                url,
+                json=payload,
+                headers={
+                    **_COMMON_HEADERS,
+                    **auth,
+                    "Accept": "application/vnd.github+json",
+                },
+            )
+        if resp.status_code >= 400:
+            logger.warning(
+                "Check run error status=%d body=%s",
+                resp.status_code,
+                resp.text[:500],
+            )
+        logger.info(
+            "Check run posted status=%d conclusion=%s sha=%s",
+            resp.status_code,
+            conclusion,
+            head_sha[:8],
+        )
+    except Exception as exc:
+        logger.error("Check run failed: %s", exc)
+
+
+async def get_pr_approvers(
+    *,
+    repo_full_name: str,
+    pr_number: int,
+    installation_id: Optional[int],
+) -> list[str]:
+    """Fetch the list of GitHub logins who approved a PR."""
+    auth = await _auth_header(installation_id)
+    if not auth:
+        return []
+
+    url = f"{_GITHUB_API}/repos/{repo_full_name}/pulls/{pr_number}/reviews"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(url, headers={**_COMMON_HEADERS, **auth})
+        if resp.status_code != 200:
+            return []
+        reviews = resp.json()
+        seen: set[str] = set()
+        approvers = []
+        for r in reviews:
+            if r.get("state") == "APPROVED":
+                login = r.get("user", {}).get("login", "")
+                if login and login not in seen:
+                    seen.add(login)
+                    approvers.append(login)
+        return approvers
+    except Exception as exc:
+        logger.error("Failed to fetch PR approvers: %s", exc)
+        return []

@@ -14,7 +14,7 @@ import yaml
 from fastapi import APIRouter, HTTPException, Request
 
 from ..config import REPOL_DIR
-from ..github import github_callback
+from ..github import get_pr_approvers, github_callback, github_check_run
 from ..helpers import record_audit
 from ..opa import query_opa
 
@@ -68,7 +68,7 @@ async def webhook_dispatch(request: Request):
         return await _handle_deploy(request, body)
     if event_type == "deployment":
         return await _handle_deploy(request, body)
-    if event_type == "pull_request":
+    if event_type in ("pull_request", "pull_request_review"):
         return await _handle_pr(request, body)
 
     # Acknowledge events we don't act on (ping, workflow_run, etc.)
@@ -157,13 +157,31 @@ async def webhook_pr(request: Request):
 async def _handle_pr(request: Request, event: dict) -> dict:
     """Core logic for pull request policy evaluation.
 
-    Optional headers:
+    Handles both pull_request and pull_request_review events.
+    Fetches the list of PR approvers from the GitHub API and posts
+    a Check Run with the policy result.
+
+    Optional override headers (for local testing without a real GitHub App):
       X-Approvers    comma-separated logins
       X-Signed-Off   true / false
     """
     pr = event.get("pull_request", event)
     head_ref = pr.get("head", {}).get("ref", pr.get("head_ref", ""))
     base_ref = pr.get("base", {}).get("ref", pr.get("base_ref", ""))
+    head_sha = pr.get("head", {}).get("sha", "")
+    pr_number = pr.get("number", 0)
+    repo_full_name = (event.get("repository") or {}).get("full_name", "")
+    installation_id = (event.get("installation") or {}).get("id")
+
+    # Prefer real approvers from GitHub API; fall back to X-Approvers header
+    if installation_id and repo_full_name and pr_number:
+        approvers = await get_pr_approvers(
+            repo_full_name=repo_full_name,
+            pr_number=pr_number,
+            installation_id=installation_id,
+        )
+    else:
+        approvers = _csv_header(request, "X-Approvers")
 
     repo_policy = _load_yaml("pullrequest.yaml")
 
@@ -171,7 +189,7 @@ async def _handle_pr(request: Request, event: dict) -> dict:
         "head_ref": head_ref,
         "base_ref": base_ref,
         "workflow_meta": {
-            "approvers": _csv_header(request, "X-Approvers"),
+            "approvers": approvers,
             "signed_off": _bool_header(request, "X-Signed-Off"),
         },
         "repo_policy": repo_policy,
@@ -180,4 +198,16 @@ async def _handle_pr(request: Request, event: dict) -> dict:
     result = await query_opa("github/pullrequest", opa_input)
     resp = record_audit("pullrequest", result, opa_input, request, source="webhook")
     resp["input"] = opa_input
+
+    if head_sha and repo_full_name:
+        await github_check_run(
+            repo_full_name=repo_full_name,
+            head_sha=head_sha,
+            allow=resp["allow"],
+            violations=resp["violations"],
+            audit_id=resp["audit_id"],
+            installation_id=installation_id,
+        )
+        resp["check_run_posted"] = True
+
     return resp
