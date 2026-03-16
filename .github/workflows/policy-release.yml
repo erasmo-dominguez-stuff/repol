@@ -35,19 +35,19 @@ jobs:
           VERSION="${{ github.event.release.tag_name || github.event.inputs.tag }}"
           opa build \
             --bundle policies/ \
-            --output "governant-policies-${VERSION}.tar.gz"
-          echo "Built governant-policies-${VERSION}.tar.gz"
-          ls -lh governant-policies-*.tar.gz
+            --output "gitpoli-policies-${VERSION}.tar.gz"
+          echo "Built gitpoli-policies-${VERSION}.tar.gz"
+          ls -lh gitpoli-policies-*.tar.gz
 
       - name: Upload bundle artifact
         uses: actions/upload-artifact@v4
         with:
-          name: governant-policies-bundle
-          path: governant-policies-*.tar.gz
+          name: gitpoli-policies-bundle
+          path: gitpoli-policies-*.tar.gz
           retention-days: 90
 
       - name: Upload bundle to release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          files: governant-policies-*.tar.gz
+          files: gitpoli-policies-*.tar.gz

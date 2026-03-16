@@ -3,9 +3,9 @@ requires = ["hatchling>=1.25.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "governant"
-version = "0.1.0"
-description = "Policy-as-code framework using OPA for GitHub workflow governance"
+name = "gitpoli"
+version = "1.0.0"
+description = "Policy-as-code for the GitHub SDLC — enforce deployment and PR rules with OPA"
 authors = [{ name = "Erasmo Dominguez" }]
 readme = "README.md"
 requires-python = ">=3.11"
@@ -28,8 +28,8 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/erasmo-dominguez-stuff/governant"
-Issues = "https://github.com/erasmo-dominguez-stuff/governant/issues"
+Homepage = "https://github.com/erasmo-dominguez-stuff/gitpoli"
+Issues = "https://github.com/erasmo-dominguez-stuff/gitpoli/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = []

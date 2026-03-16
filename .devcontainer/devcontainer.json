@@ -1,5 +1,5 @@
 {
-  "name": "governant",
+  "name": "gitpoli",
   "image": "mcr.microsoft.com/devcontainers/base:ubuntu-22.04",
   "features": {
     "ghcr.io/devcontainers/features/python:1": {
@@ -30,7 +30,7 @@
       }
     }
   },
-  "postCreateCommand": "pip install -e '.[dev]' && pre-commit install && echo '✅ governant dev environment ready'",
+  "postCreateCommand": "pip install -e '.[dev]' && pre-commit install && echo '✅ gitpoli dev environment ready'",
   "mounts": [
     "source=${localWorkspaceFolder},target=/workspace,type=bind"
   ],

@@ -39,8 +39,8 @@ for inst in installs:
         )
         if repos_r.status_code == 200:
             repos = [r["full_name"] for r in repos_r.json().get("repositories", [])]
-            has_governant = "erasmo-dominguez-stuff/governant" in repos
+            has_gitpoli = "erasmo-dominguez-stuff/gitpoli" in repos
             print(f"  Total repos: {len(repos)}")
-            print(f"  governant included: {has_governant}")
-            if not has_governant:
+            print(f"  gitpoli included: {has_gitpoli}")
+            if not has_gitpoli:
                 print(f"  Repos: {repos}")

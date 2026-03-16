@@ -1,5 +1,5 @@
-# governant – Pull Request Policy Configuration
-# This file is placed in .repol/ of each repository that adopts governant.
+# gitpoli – Pull Request Policy Configuration
+# This file is placed in .repol/ of each repository that adopts gitpoli.
 # Teams edit this YAML to define PR validation rules.
 
 policy:

@@ -2,7 +2,7 @@
 SHELL         := /usr/bin/env bash
 POLICIES_DIR  := policies
 SCHEMAS_DIR   := schemas
-BUNDLE_NAME   := governant-policies.tar.gz
+BUNDLE_NAME   := gitpoli-policies.tar.gz
 
 .PHONY: help check fmt test build clean validate-schemas
 

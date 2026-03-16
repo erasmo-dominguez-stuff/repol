@@ -1,7 +1,5 @@
 # CODEOWNERS
-# Policy code, schemas, and team configuration are owned by the governant-admin team.
+# Policy code, schemas, and team configuration are owned by the gitpoli-admin team.
 # Enables "Require review from Code Owners" in branch protection settings.
 
-/policies/**  @erasmo-dominguez-stuff/governant-admin
-/schemas/**   @erasmo-dominguez-stuff/governant-admin
-/.repol/**    @erasmo-dominguez-stuff/governant-admin
+/policies/**  @erasmo-dominguez-stuff/gitpoli-admin /schemas/**   @erasmo-dominguez-stuff/gitpoli-admin /.repol/**    @erasmo-dominguez-stuff/gitpoli-admin

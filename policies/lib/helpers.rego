@@ -3,7 +3,7 @@ package lib.helpers
 import rego.v1
 
 # =============================================================================
-#  Shared helper functions used by all governant policies.
+#  Shared helper functions used by all gitpoli policies.
 # =============================================================================
 
 # ── Type guards ───────────────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
-# governant – Deployment Protection Policy Configuration
-# This file is placed in .repol/ of each repository that adopts governant.
+# gitpoli – Deployment Protection Policy Configuration
+# This file is placed in .repol/ of each repository that adopts gitpoli.
 # Teams edit this YAML to define deployment rules per environment.
 
 policy:
@@ -13,21 +13,21 @@ policy:
     production:
       enabled: true
       rules:
-        approvals_required: 0
+        approvals_required: 2
         allowed_branches:
         - main
-        tests_passed: false
-        signed_off: false
+        tests_passed: true
+        signed_off: true
         max_deployments_per_day: 5
 
     staging:
       enabled: true
       rules:
-        approvals_required: 1
+        approvals_required: 0
         allowed_branches:
         - main
         - develop
-        tests_passed: true
+        tests_passed: false
         signed_off: false
         max_deployments_per_day: 20
 

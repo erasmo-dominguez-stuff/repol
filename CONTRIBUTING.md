@@ -1,4 +1,4 @@
-# Contributing to Governant
+# Contributing to gitpoli
 
 ## Development environment (devcontainer)
 
@@ -40,8 +40,8 @@ If you prefer working outside the devcontainer, install the prerequisites manual
 | [pre-commit](https://pre-commit.com/) | `pip install pre-commit` |
 
 ```bash
-git clone https://github.com/erasmo-dominguez-stuff/governant.git
-cd governant
+git clone https://github.com/erasmo-dominguez-stuff/gitpoli.git
+cd gitpoli
 
 pip install -e ".[dev]"
 pre-commit install
