@@ -38,10 +38,11 @@ Each policy follows the same pattern:
 
 ### Two modes of operation
 
-| Mode | When | How |
-|------|------|-----|
-| **CI/CD** | Every push and PR | GitHub Actions composite action (`.github/actions/eval-policy/`) evaluates policies with the OPA CLI. No server required. |
-| **Webhook** | Deployment to a protected environment | A FastAPI server receives `deployment_protection_rule` events, evaluates the policy via OPA, records an audit trail, and calls back to GitHub to approve or reject. Authenticated as a GitHub App (JWT + installation token, no PAT). |
+| Mode | Event | How | Requires server? |
+|------|-------|-----|------------------|
+| **CI/CD** | Push / PR | GitHub Actions composite action evaluates policies with the OPA CLI. | No |
+| **App webhook — Deploy** | `deployment_protection_rule` | FastAPI server receives the event, evaluates the deploy policy via OPA, and calls back to GitHub to approve or reject. | Yes |
+| **App webhook — PR** | `pull_request`, `pull_request_review` | FastAPI server receives the event, fetches real approvers from the GitHub API, evaluates the PR policy via OPA, and posts a Check Run (`gitpoli / PR Policy`) on the PR. | Yes |
 
 ---
 
@@ -85,7 +86,43 @@ Each policy follows the same pattern:
           └──────────────────┘                   └──────────────┘
 ```
 
-### CI/CD flow (pull request checks)
+### Webhook flow (pull request policy)
+
+```
+ Developer opens / updates PR  ─── or ───  Reviewer submits approval
+           │                                         │
+           └─────────────────┬───────────────────────┘
+                             │  pull_request / pull_request_review event
+                             ▼
+                      ┌─────────────┐
+                      │  smee.io    │  (webhook tunnel — dev/integration only)
+                      └──────┬──────┘
+                             │  POST /webhook
+                             ▼
+             ┌───────────────────────────────────────────┐
+             │          gitpoli Policy Server             │
+             │             (FastAPI :8080)                │
+             │                                           │
+             │  1. Parse event (head_ref, base_ref, sha) │
+             │  2. GET /pulls/{n}/reviews → approvers    │
+             │  3. Load .repol/pullrequest.yaml           │
+             │  4. Build OPA input                       │
+             │  5. Query OPA ──────────────────────┐     │
+             │  6. Record audit event (SQLite)     │     │
+             │  7. POST /check-runs ─────────────┐ │     │
+             └───────────────────────────────────┼─┼─────┘
+                                                 │ │
+                           ┌─────────────────────┘ └──────────────┐
+                           ▼                                       ▼
+                 ┌──────────────────┐                   ┌──────────────┐
+                 │   GitHub API     │                   │   OPA :8181  │
+                 │  (Check Run      │                   │  (Rego v1)   │
+                 │  gitpoli/PR      │                   └──────────────┘
+                 │  Policy ✅/❌)   │
+                 └──────────────────┘
+```
+
+### CI/CD flow (pull request checks — Actions only)
 
 ```
  Developer opens / updates PR
@@ -204,7 +241,7 @@ make build
 
 ## Creating the GitHub App
 
-To use gitpoli as a **deployment protection rule**, you need a GitHub App that receives `deployment_protection_rule` webhook events and calls back to approve or reject deployments.
+gitpoli uses a **single GitHub App** for both deployment protection and pull request policy. The App authenticates with a JWT + installation token (no PAT required).
 
 ### Step 1: Register the App
 
@@ -218,28 +255,50 @@ To use gitpoli as a **deployment protection rule**, you need a GitHub App that r
 | **Webhook URL** | Your smee.io channel URL (see [Integration Testing](#integration-testing-real-webhooks)) |
 | **Webhook secret** | _(leave blank or set one)_ |
 
-3. Under **Permissions**:
-   - **Repository permissions:**
-     - `Deployments` → **Read and write**
-     - `Actions` → **Read-only** (optional, for workflow visibility)
-   - **Subscribe to events:**
-     - ☑ **Deployment protection rules**
+3. Under **Repository permissions** set:
 
-4. Click **Create GitHub App**.
+| Permission | Level | Required for |
+|------------|-------|--------------|
+| `Actions` | Read and write | Workflow control |
+| `Checks` | **Read and write** | Posting PR Check Runs |
+| `Deployments` | **Read and write** | Deployment approval/rejection |
+| `Environments` | Read and write | Reading environment config |
+| `Pull requests` | **Read-only** (minimum) | Fetching PR approver reviews |
+
+4. Under **Subscribe to events** enable:
+   - ☑ **Deployment protection rule**
+   - ☑ **Deployment** / **Deployment status**
+   - ☑ **Pull request**
+   - ☑ **Pull request review**
+   - ☑ **Check run**
+
+5. Click **Create GitHub App**.
 
 ### Step 2: Generate a Private Key
 
 1. After creating the App, scroll to **Private keys** → **Generate a private key**
 2. Download the `.pem` file
-3. Place it at `infra/integration/app.pem`
+3. Place it at `infra/integration/priv.pem`
 4. Note the **App ID** from the App's General page
 
-### Step 3: Install the App on Your Repository
+### Step 3: Configure Credentials
+
+Edit `infra/integration/.env`:
+
+```env
+SMEE_URL=https://smee.io/<your-channel>
+GITHUB_APP_ID=<your-app-id>
+GITHUB_APP_PRIVATE_KEY_FILE=./priv.pem
+```
+
+### Step 4: Install the App on Your Repository
 
 1. Go to **GitHub → Settings → Developer settings → GitHub Apps → your app → Install App**
-2. Select the organization / account that owns your target repository
+2. Select the account/organization that owns your target repo
 3. Choose **Only select repositories** → select the target repo
 4. Click **Install**
+
+> **Important:** Every time you change permissions in the App settings you must **accept the new permissions** on the installation page. Without this step, the new permissions won't be active. Go to **Settings → Applications → Installed GitHub Apps → your app → Configure** and click **Review request**.
 
 ---
 
@@ -305,50 +364,69 @@ policy:
         max_deployments_per_day: 50
 ```
 
-### Step 4: Test with a Deployment
+### Step 4: Test a Deployment
 
-1. Go to **Actions → Test Deployment (Integration) → Run workflow**
-2. Select an environment and click **Run workflow**
-3. The job will wait for the deployment protection rule to approve/reject
-4. Check the audit trail: `curl -s http://localhost:8080/audit | jq .`
+1. Make sure the integration stack is running: `make integration-up`
+2. Go to **Actions → Test Deployment (Integration) → Run workflow**
+3. Select an environment and click **Run workflow**
+4. The job will pause waiting for the protection rule to approve/reject
+5. Watch the server logs: `make integration-logs`
+6. Check the audit trail: `curl -s http://localhost:8080/audit | jq .`
 
 ---
 
 ## Integration Testing (Real Webhooks)
 
-End-to-end testing with real GitHub `deployment_protection_rule` webhooks via [smee.io](https://smee.io).
+End-to-end testing with real GitHub webhooks via [smee.io](https://smee.io). Covers **both** deployment protection and pull request policy.
 
-### Setup
+### Prerequisites
 
-```bash
-# Interactive setup — creates smee channel, validates credentials
-make integration-setup
-```
+- GitHub App created and installed on the repo ([Creating the GitHub App](#creating-the-github-app))
+- `infra/integration/priv.pem` — downloaded private key
+- `infra/integration/.env` — configured with `SMEE_URL` and `GITHUB_APP_ID`
+- The smee.io channel URL set as the **Webhook URL** in the GitHub App settings
 
-Or manually:
-
-1. Create a smee.io channel at https://smee.io/new
-2. Copy `infra/integration/.env.example` → `infra/integration/.env`
-3. Set `SMEE_URL`, `GITHUB_APP_ID`, and place the `.pem` key at `infra/integration/app.pem`
-
-### Run
+### Start the stack
 
 ```bash
-make integration-up      # start OPA + server + smee tunnel
-make integration-logs    # tail all service logs
+make integration-up      # start OPA + policy server + smee tunnel
+make integration-logs    # tail all service logs (server + smee + opa)
 make integration-audit   # query audit events
 make integration-down    # stop everything
 ```
 
-### What happens
+### Testing deployment protection
 
-1. You trigger a deployment in your GitHub repository (manually or via `test-deploy.yml`)
-2. GitHub sends a `deployment_protection_rule` event to the smee.io channel
-3. `smee-client` forwards it to `POST /webhook` on the policy server
-4. The server loads `.repol/deploy.yaml`, builds the OPA input, and queries OPA
-5. OPA evaluates `policies/deploy.rego` and returns allow/deny + violations
-6. The server records an audit event and calls back to GitHub to approve/reject
-7. The audit event is updated with the callback result (HTTP status, state)
+1. Ensure the environments (`production`, `staging`, `development`) exist in the repo and the GitHub App is enabled as a protection rule for each
+2. Trigger a deployment via **Actions → Test Deployment (Integration) → Run workflow** or any workflow that deploys to a protected environment
+3. GitHub sends a `deployment_protection_rule` webhook → smee → server
+4. The server loads `.repol/deploy.yaml`, evaluates via OPA, and calls back to approve or reject
+5. Check the result:
+
+```bash
+make integration-logs    # look for: decision=allow/deny  callback state=approved/rejected
+curl -s http://localhost:8080/audit?policy=deploy | jq .
+```
+
+### Testing pull request policy
+
+1. Open a pull request in the repository (any branch → `main` or `develop`)
+2. GitHub sends a `pull_request` webhook → smee → server
+3. The server fetches real approvers via `GET /repos/{owner}/{repo}/pulls/{n}/reviews`
+4. OPA evaluates `.repol/pullrequest.yaml` rules (branch naming, approvals, target branch)
+5. The server posts a **Check Run** (`gitpoli / PR Policy`) on the PR with `success` or `failure`
+6. Check the result:
+
+```bash
+make integration-logs    # look for: decision=allow/deny  check_run posted status=201
+curl -s http://localhost:8080/audit?policy=pullrequest | jq .
+```
+
+The Check Run will appear in the PR's **Checks** tab on GitHub:
+- ✅ `gitpoli / PR Policy — Policy passed`
+- ❌ `gitpoli / PR Policy — Policy violations found` (with violation codes listed)
+
+> **Tip:** To also trigger on review approvals, the App must have the `pull_request_review` event subscribed. When a reviewer approves, a new `pull_request_review` webhook fires and the check run is updated automatically.
 
 ### Services
 
