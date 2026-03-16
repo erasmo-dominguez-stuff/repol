@@ -43,6 +43,9 @@ jobs:
   policy:
     name: gitpoli PR Policy
     needs: collect
+    permissions:
+      contents: read
+      pull-requests: read
     uses: ./.github/workflows/reusable-pr-check.yml
     with:
       head-ref: ${{ needs.collect.outputs.head_ref }}
