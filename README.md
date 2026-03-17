@@ -48,6 +48,66 @@ Each policy follows the same pattern:
 
 ## Architecture
 
+
+### Component Diagrams
+
+#### Local Stack (Docker Compose)
+
+```mermaid
+graph TD
+  subgraph Local
+    GH[GitHub]
+    Smee[smee.io (optional)]
+    Server[FastAPI Policy Server]
+    OPA[OPA (Rego)]
+    DB[(SQLite)]
+  end
+  GH-->|Webhook|Smee
+  Smee-->|POST /webhook|Server
+  Server-->|REST|OPA
+  Server-->|Audit|DB
+  OPA-->|Decision|Server
+  Server-->|GitHub API|GH
+```
+
+#### Integration Stack (with Cosmos & smee)
+
+```mermaid
+graph TD
+  subgraph Integration
+    GH[GitHub]
+    Smee[smee.io]
+    Server[FastAPI Policy Server]
+    OPA[OPA (Rego)]
+    Cosmos[(Cosmos DB)]
+  end
+  GH-->|Webhook|Smee
+  Smee-->|POST /webhook|Server
+  Server-->|REST|OPA
+  Server-->|Audit|Cosmos
+  OPA-->|Decision|Server
+  Server-->|GitHub API|GH
+```
+
+#### Azure-like Stack (Production Mapping)
+
+```mermaid
+graph TD
+  subgraph Azure
+    GH[GitHub]
+    App[GitHub App]
+    Func[Azure Functions (FastAPI)]
+    OPA[OPA (Rego)]
+    Cosmos[(Cosmos DB)]
+  end
+  GH-->|Webhook|App
+  App-->|POST /webhook|Func
+  Func-->|REST|OPA
+  Func-->|Audit|Cosmos
+  OPA-->|Decision|Func
+  Func-->|GitHub API|GH
+```
+
 ### Webhook flow (deployment protection)
 
 ```
