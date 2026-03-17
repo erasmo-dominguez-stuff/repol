@@ -94,3 +94,17 @@ integration-logs: ## Tail logs from integration stack
 
 integration-audit: ## Query audit events from integration server
 	@curl -sf http://localhost:8080/audit | python3 -m json.tool
+
+# ── Azure-like integration environment ───────────────────────────────────────
+
+az-integration-up: ## Start Azure-like integration stack (Cosmos, OPA, Functions, smee)
+	docker compose -f infra/az-integration/docker-compose.yml up -d --build
+
+az-integration-down: ## Stop Azure-like integration stack
+	docker compose -f infra/az-integration/docker-compose.yml down
+
+az-integration-logs: ## Tail logs from Azure-like integration stack
+	docker compose -f infra/az-integration/docker-compose.yml logs -f
+
+az-integration-test: ## Run integration tests against Azure-like stack
+	bash infra/az-integration/scripts/test.sh

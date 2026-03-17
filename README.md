@@ -609,3 +609,55 @@ docker compose up -d   # Starts opa, server, smee
 - Policy evaluation, audit, and callbacks are handled as in Azure.
 
 ---
+
+## Azure-like Integration Stack (az-integration)
+
+You can simulate the full Azure production stack locally using Docker Compose in `infra/az-integration/`:
+
+- Cosmos DB Emulator (or Mongo as fallback)
+- Azure Functions (Core Tools, Python)
+- OPA (Open Policy Agent)
+- smee (webhook relay, simulates Event Grid)
+
+### Usage
+
+```bash
+make az-integration-up      # Start Azure-like stack
+make az-integration-logs    # Tail logs from all services
+make az-integration-down    # Stop everything
+```
+
+- The backend Python runs as an Azure Function (HTTP trigger) using Core Tools.
+- Audit events are stored in Cosmos DB (emulator) if `AUDIT_BACKEND=cosmos`, or SQLite if `AUDIT_BACKEND=sqlite`.
+- All components are selected via environment variables and inyectable contracts (see below).
+
+
+### Extensibility & Clean Architecture (Adapter/Factory Pattern)
+
+All variable components (audit, config, OPA client, etc.) implement a contract (interface/abstract class) in `core/`, with adapters in `adapters/`:
+
+- `AuditTrail`: `SQLiteAuditTrail`, `CosmosAuditTrail`
+- `Config`: `EnvConfig`, ...
+- (You can extend this pattern to OPA client, storage, etc.)
+
+The factory (e.g. `audit.py`) selects the correct implementation based on environment variables (e.g. `AUDIT_BACKEND`). This means:
+
+- **`audit.py` is NOT an adapter or implementation.** It is a pure factory that injects the correct adapter everywhere.
+- To add a new backend, create a new adapter in `adapters/` and update the factory to support it.
+- All code uses the interface (`AuditTrail`), never the concrete class directly.
+
+**How to extend:**
+
+1. **Add a new backend:**
+  - Create a new adapter in `src/app/adapters/` implementing the relevant interface from `core/`.
+  - Update the factory (e.g. `audit.py`) to select your adapter based on an environment variable.
+2. **Add a new policy handler:**
+  - Create a new handler in `src/app/handlers/` and register it in the handler registry.
+  - See the extensibility section and CONTRIBUTING.md for details.
+
+**This pattern ensures:**
+- All logic is decoupled and testable.
+- Adding new backends or policies is easy and does not require changing core logic.
+- The codebase is clean, DRY, and ready for production or further extension.
+
+---

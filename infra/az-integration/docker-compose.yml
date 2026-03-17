@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  cosmosdb:
+    image: mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:latest
+    environment:
+      - AZURE_COSMOS_EMULATOR_PARTITION_COUNT=2
+      - AZURE_COSMOS_EMULATOR_ENABLE_DATA_PERSISTENCE=true
+    ports:
+      - "8081:8081" # HTTPS endpoint
+      - "10251-10255:10251-10255"
+    # Cosmos emulator requires Windows or Linux with nested virtualization
+    # For Mac M1/M2, use mongo:latest as a fallback for demo
+    # image: mongo:latest
+    # ports:
+    #   - "27017:27017"
+
+  opa:
+    image: openpolicyagent/opa:latest
+    command: ["run", "--server", "--addr", ":8181", "--log-level", "info", "/policies"]
+    ports:
+      - "8181:8181"
+    volumes:
+      - ../../policies:/policies:ro
+
+  smee:
+    build:
+      context: ../integration/smee
+    environment:
+      SMEE_URL: ${SMEE_URL:-}
+      SMEE_TARGET: http://host.docker.internal:7071/api/webhook
+    depends_on:
+      - func
+    restart: unless-stopped
+
+  func:
+    image: mcr.microsoft.com/azure-functions/python:4-python3.11
+    environment:
+      AzureWebJobsStorage: UseDevelopmentStorage=true
+      FUNCTIONS_WORKER_RUNTIME: python
+      CosmosDbConnectionString: "AccountEndpoint=https://cosmosdb:8081/;AccountKey=C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLMo5QDU5QzU=;"
+      OPA_URL: http://opa:8181
+    volumes:
+      - ../../src:/home/site/wwwroot
+    ports:
+      - "7071:7071"
+    depends_on:
+      - cosmosdb
+      - opa
+
+networks:
+  default:
+    name: az-integration

@@ -52,16 +52,35 @@ make lint test
 ## Project layout
 # Contributing
 
-## Development Guide
+
+## Development Guide & Extensibility
 
 - Use devcontainer for consistent environment
 - Run `make lint test` before pushing
 - Policies live in `.repol/` and `policies/`
-- API and webhook logic in `infra/server/app/routers/`
-- Policy evaluation logic in `infra/server/app/handlers/` (each handler in its own module)
-- Audit trail in adapters/classes (`infra/server/app/adapters/sqlite_audit_trail.py`)
-- OPA client in adapters/classes (`infra/server/app/adapters/opa_http_client.py`)
-- Interfaces in `infra/server/app/core/` (PolicyEvaluator, AuditTrail, HandlerRegistry)
+- API and webhook logic in `src/app/routers/`
+- Policy evaluation logic in `src/app/handlers/` (each handler in its own module)
+- **Adapters for all variable backends live in `src/app/adapters/` (e.g. `sqlite_audit_trail.py`, `cosmos_audit_trail.py`).**
+- **All contracts/interfaces are in `src/app/core/` (e.g. `AuditTrail`, `Config`, `PolicyEvaluator`).**
+- **Factories (e.g. `audit.py`) select the correct adapter based on environment variables.**
+
+### Adapter/Factory Pattern
+
+- `audit.py` is a pure factory, not an implementation. It injects the correct adapter everywhere.
+- To add a new backend, create a new adapter in `adapters/` and update the factory to support it.
+- All code uses the interface (`AuditTrail`), never the concrete class directly.
+
+### How to Extend
+
+**Add a new backend:**
+1. Create a new adapter in `src/app/adapters/` implementing the relevant interface from `core/`.
+2. Update the factory (e.g. `audit.py`) to select your adapter based on an environment variable.
+
+**Add a new policy handler:**
+1. Create a new handler in `src/app/handlers/` and register it in the handler registry.
+2. See the extensibility section and example code below.
+
+This pattern ensures the codebase is modular, testable, and easy to extend for new backends or policies.
 
 ## Adding a New Policy (SOLID/Hexagonal Architecture)
 

@@ -13,6 +13,7 @@ from . import audit
 
 logger = logging.getLogger(__name__)
 
+# Use the injected audit_trail instance
 
 def format_response(result: dict) -> dict:
     """Normalise an OPA result dict into ``{allow, violations}``.
@@ -27,7 +28,6 @@ def format_response(result: dict) -> dict:
         ),
     }
 
-
 def record_audit(
     policy: str,
     result: dict,
@@ -40,5 +40,12 @@ def record_audit(
     Returns a dict with ``allow``, ``violations``, and ``audit_id`` keys.
     """
     resp = format_response(result)
-    # ...existing code for audit recording...
+    # Use the selected audit_trail implementation
+    meta = {
+        "client": str(request.client.host) if hasattr(request, "client") else None,
+        "headers": dict(request.headers),
+        "source": source,
+    }
+    audit_id = audit.audit_trail.record(policy, result, input_data, meta)
+    resp["audit_id"] = audit_id
     return resp
