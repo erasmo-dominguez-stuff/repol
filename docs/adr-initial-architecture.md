@@ -13,109 +13,99 @@ Currently, the codebase and proof of concept (POC) reflect a synchronous, monoli
 * **Event Correlation:** Auditing and compliance require linking multiple distinct events over time (e.g., tying a specific PR approval to a deployment artifact and its compliance status).
 
 ## Decision
-We will transition from the current synchronous POC to an **event-driven, highly decoupled architecture based on Serverless/PaaS services**. This design separates the transactional plane (rule execution) from the audit plane (telemetry streaming and correlation).
+We will transition from the current synchronous POC to an **event-driven, highly decoupled architecture based on Serverless/PaaS services**. To maintain strict separation of concerns and ensure the system is highly modular, the architectural components are grouped into five logical layers. This design separates the transactional plane (rule execution) from the audit plane (telemetry streaming and correlation).
 
 ---
 
-## 1. Architectural Components (Target State / To-Be)
+## 1. Architectural Layers & Components (Target State / To-Be)
 
-To achieve a truly decoupled and extensible system, the architecture is divided into the following logical components.
+### 1.1. Ingestion Layer
+Responsible solely for securely receiving external signals and acknowledging them quickly.
+* **Webhook Gateway:** The single public entry point for all external platforms emitting events. Webhook emitters (like GitHub or ADO) require fast responses. It receives the webhook, validates cryptographic signatures, normalizes the disparate payload into an internal standard (like *CloudEvents*), immediately publishes it to the Event Bus, and returns a `200 OK` HTTP code to release the connection.
 
-### 1.1. Webhook Gateway
-* **What it is:** The single public entry point for all external platforms emitting events.
-* **Why it is necessary:** Webhook emitters (like GitHub or ADO) require fast responses (usually under 10 seconds). If the system processes the policy synchronously and takes too long, the emitter drops the connection and assumes a failure.
-* **Responsibilities:** Receives the webhook, validates cryptographic signatures, normalizes the disparate payload into an internal standard (like *CloudEvents*), immediately publishes it to the Event Bus, and returns a `200 OK` HTTP code to the emitter to release the connection.
+### 1.2. Messaging Layer
+The asynchronous transport backbone that guarantees delivery, separates operational traffic from telemetry, and buffers load spikes.
+* **Transactional Message Broker (Control Plane):** An asynchronous messaging queue oriented towards transactions (e.g., Azure Service Bus, RabbitMQ). It ensures no evaluation event is lost, allowing for automatic retries or Dead Letter Queues (DLQ) if the engine fails.
+* **Data Streaming Bus (Audit & Telemetry Plane):** A massive data stream ingestion engine (e.g., Azure Event Hubs). It passively ingests copies of original events and final decisions to dump them at high speed into the analytical storage system without slowing down the transactional flow.
 
-### 1.2. Transactional Message Broker (Control Plane)
-* **What it is:** An asynchronous messaging queue oriented towards transactions (equivalent to Azure Service Bus, AWS SQS, or RabbitMQ).
-* **Why it is necessary:** To ensure no evaluation event is lost. If the policy engine fails temporarily, the broker queues the message and allows automatic retries or sends it to a Dead Letter Queue (DLQ).
-* **Responsibilities:** Decouples fast ingestion from heavy evaluation, distributing evaluation tasks to the orchestrator in an orderly and reliable manner.
+### 1.3. Decision Core Layer
+The brain of the platform. It handles workflow coordination, gathers state, and executes pure logic.
+* **Policy Orchestrator:** The coordinating "brain" of the workflow. It consumes normalized events from the Transactional Broker, identifies which policy applies, requests necessary extra data from the Context Provider, sends the full package to OPA, and delegates the enforcement.
+* **Context Provider (Context Enricher):** A service dedicated exclusively to fetching external data. It queries external APIs (ITSM, Cloud, Databases) and returns a consolidated ("enriched") JSON containing all the necessary state of the world so the policy can be evaluated blindly.
+* **Policy Engine (OPA):** The purely logical and mathematical execution engine based on Open Policy Agent and Rego. It isolates the compliance policy source code from the platform's integration logic, executing rules and returning a strict verdict (`allow`, `deny`, or `violations`).
 
-### 1.3. Data Streaming Bus (Audit & Telemetry Plane)
-* **What it is:** A massive data stream ingestion engine (equivalent to Azure Event Hubs or AWS Kinesis Firehose).
-* **Why it is necessary:** Saving structured logs for every webhook received and every decision made generates a massive volume of writes. Doing this in the main transactional flow slows down the system.
-* **Responsibilities:** Passively ingests copies of original events and final decisions to dump them at high speed into the analytical storage system.
+### 1.4. Enforcement Layer
+The outbound integration tier that translates internal decisions into specific actions on external platforms.
+* **Action Dispatcher:** The outbound enforcement component. It isolates OPA and the Orchestrator from the specifics of the target platform APIs, translating the final decision into the specific API call required (e.g., making a POST request to the GitHub API to fail a Check Run).
 
-### 1.4. Policy Orchestrator
-* **What it is:** The coordinating "brain" of the workflow, ideally implemented using stateful workflows (e.g., Azure Durable Functions).
-* **Why it is necessary:** OPA is a stateless engine; it doesn't know how to fetch information or apply decisions. A component must coordinate the data journey.
-* **Responsibilities:** Consumes normalized events from the Transactional Broker. Identifies which policy applies, requests necessary extra data from the *Context Provider*, sends the full package to OPA, and delegates the enforcement to the *Action Dispatcher*.
-
-### 1.5. Context Provider (Context Enricher)
-* **What it is:** A service dedicated exclusively to fetching external data.
-* **Why it is necessary:** Release Gate policies often dictate: "Do not deploy if there is no approved ticket in Jira". Since OPA does not connect to Jira, this component assumes that role.
-* **Responsibilities:** Receives requests from the Orchestrator, queries external APIs (ITSM, Cloud, Databases), and returns a consolidated ("enriched") JSON containing all the necessary state of the world so the policy can be evaluated blindly.
-
-### 1.6. Policy Engine (OPA)
-* **What it is:** The purely logical and mathematical execution engine based on Open Policy Agent and Rego.
-* **Why it is necessary:** It is the core of the *Policy as Code* concept. It isolates the compliance policy source code from the platform's integration logic.
-* **Responsibilities:** Validates the enriched JSON against defined schemas, executes Rego policies, and returns a strict verdict (`allow`, `deny`, or a list of `violations`).
-
-### 1.7. Action Dispatcher
-* **What it is:** The outbound enforcement component.
-* **Why it is necessary:** To isolate OPA and the Orchestrator from the specifics of the target platform APIs.
-* **Responsibilities:** Translates the final decision into the specific API call required (e.g., making a POST request to the GitHub API to fail a Check Run, or calling the Azure DevOps API to reject a deployment gate).
-
-### 1.8. Event Store & Correlation Engine
-* **What it is:** An analytical and document database ecosystem (e.g., Cosmos DB + Log Analytics / Data Explorer).
-* **Why it is necessary:** For security auditing and resolving rules that span across time (e.g., "Does this deployment have a previously approved associated PR?").
-* **Responsibilities:** Passively listens to the Data Streaming Bus. Uses unified identifiers (like the *Commit SHA* or *Trace ID*) to build a single document representing the entire lifecycle of a code change, from commit to production.
+### 1.5. Observability & Data Layer
+The historical memory of the system, responsible for compliance tracking, event lineage, and security auditing.
+* **Event Store & Correlation Engine:** An analytical database ecosystem (e.g., Cosmos DB + Log Analytics). It passively listens to the Data Streaming Bus, using unified identifiers (like the *Commit SHA*) to build a single document representing the entire lifecycle of a code change for security auditing and resolving rules that span across time.
 
 ---
 
 ## 2. Architecture Diagrams
 
 ### 2.1. Conceptual Target Architecture (To-Be)
-
-This diagram shows the technology-agnostic logical flow, highlighting the separation between transactional processing and the telemetry/correlation plane.
+This diagram shows the technology-agnostic logical flow, highlighting the separation of concerns through the five architectural layers.
 
 ```mermaid
 flowchart TD
     %% External Entities
-    Platforms["External Platforms<br/>(Event Sources & Targets)"]
-    ExternalAPIs["External Systems<br/>(ITSM, Cloud, etc.)"]
+    Source["Event Sources (GitHub/ADO)"]
+    Target["Target Platform APIs (GitHub/ADO)"]
+    ExternalAPIs["External Systems (ITSM, Cloud)"]
 
-    %% Ingestion Layer
-    Gateway["Webhook Gateway"]
+    %% Logical Layers
+    subgraph Layer1 ["1. Ingestion Layer"]
+        Gateway["Webhook Gateway"]
+    end
+
+    subgraph Layer2 ["2. Messaging Layer"]
+        EventBus[["Transactional Broker"]]
+        StreamBus[["Data Streaming Bus"]]
+    end
+
+    subgraph Layer3 ["3. Decision Core Layer"]
+        Orchestrator["Policy Orchestrator"]
+        ContextEnricher["Context Provider"]
+        PolicyEngine["Policy Engine (OPA)"]
+    end
+
+    subgraph Layer4 ["4. Enforcement Layer"]
+        ActionDispatcher["Action Dispatcher"]
+    end
+
+    subgraph Layer5 ["5. Observability & Data Layer"]
+        Correlation["Correlation Engine"]
+        EventStore[("State & Audit Store")]
+    end
+
+    %% --- Flows ---
+    Source -->|"Webhook"| Gateway
     
-    %% Messaging Layers (Transactional vs Streaming)
-    EventBus[["Transactional Broker<br/>(Control Plane)"]]
-    StreamBus[["Data Streaming Bus<br/>(Audit Plane)"]]
-
-    %% Decision Core Layer
-    Orchestrator["Policy Orchestrator"]
-    ContextEnricher["Context Provider"]
-    PolicyEngine["Policy Engine (OPA)"]
-    ActionDispatcher["Action Dispatcher"]
-
-    %% Data and Observability Layer
-    Correlation["Correlation Engine"]
-    EventStore[("State & Audit Store")]
-
-    %% --- Relationships ---
-    Platforms -- "1. Webhook / Event" --> Gateway
+    Gateway -->|"Publish Event"| EventBus
+    Gateway -.->|"Raw Telemetry"| StreamBus
     
-    %% Transactional Flow
-    Gateway -- "2. Normalize & Publish" --> EventBus
-    EventBus -- "3. Consume" --> Orchestrator
-    Orchestrator -- "4. Request Context" --> ContextEnricher
-    ContextEnricher -. "5. Query State" .-> ExternalAPIs
-    ContextEnricher -- "6. Enriched JSON" --> Orchestrator
-    Orchestrator -- "7. Evaluate" --> PolicyEngine
-    PolicyEngine -- "8. Decision" --> Orchestrator
-    Orchestrator -- "9. Dispatch Action" --> ActionDispatcher
-    ActionDispatcher -- "10. API Call" --> Platforms
+    EventBus -->|"Consume"| Orchestrator
     
-    %% Audit and Correlation Flow
-    Gateway -. "Copy Raw Event" .-> StreamBus
-    Orchestrator -. "Copy Decision" .-> StreamBus
-    StreamBus -- "Consume (Passive)" --> Correlation
-    Correlation -- "Link by ID (e.g. SHA)" --> EventStore
-    ContextEnricher -. "Query History" .-> EventStore
+    %% Core Loop
+    Orchestrator <-->|"Context Request/Reply"| ContextEnricher
+    ContextEnricher -.->|"Query API"| ExternalAPIs
+    Orchestrator <-->|"Eval Request/Reply"| PolicyEngine
+    
+    %% Outbound
+    Orchestrator -->|"Dispatch Decision"| ActionDispatcher
+    ActionDispatcher -->|"Enforce Policy"| Target
+    
+    %% Audit Loop
+    Orchestrator -.->|"Decision Audit"| StreamBus
+    StreamBus -->|"Passive Consume"| Correlation
+    Correlation -->|"Link by ID"| EventStore
+    ContextEnricher -.->|"Query History"| EventStore
 ```
 
 ### 2.2. Current Architecture (As-Is / POC)
-
 The current implementation synchronously couples ingestion, evaluation, and enforcement into a single monolith. This diagram illustrates the detailed integration with GitHub using a GitHub App and Custom Protection Rules routed through Smee.
 
 ```mermaid
@@ -151,92 +141,112 @@ flowchart TD
 ```
 
 ### 2.3. Enterprise Implementation in Azure (To-Be Serverless)
-
-Mapping the conceptual architecture to native Microsoft Azure Serverless and PaaS services, removing the need to manage Kubernetes (AKS) clusters and optimizing for cost and scalability.
+Mapping the conceptual architecture layers to native Microsoft Azure Serverless and PaaS services, optimizing for cost and scalability.
 
 ```mermaid
 flowchart TD
     %% External Entities
-    GH["GitHub / ADO Webhooks"] -- "HTTPS" --> Gateway
+    GH["GitHub / ADO Webhooks"]
     ExternalAPIs["ServiceNow / Cloud APIs"]
 
-    subgraph Azure_Serverless_Ecosystem [Azure Event-Driven Architecture]
-        %% Ingestion and Messaging
-        Gateway["Azure API Management / Function<br/>(Webhook Gateway)"]
-        ServiceBus[["Azure Service Bus<br/>(Transactional Topics)"]]
-        EventHubs[["Azure Event Hubs<br/>(Data Streaming)"]]
-        
-        %% Processing (Core)
-        Orchestrator["Azure Durable Functions<br/>(Policy Orchestrator)"]
-        Context["Azure Functions<br/>(Context Provider)"]
-        OPA["Azure Container Apps<br/>(OPA Engine)"]
-        
-        %% Enforcement
-        ActionDispatcher["Azure Functions<br/>(Action Dispatcher)"]
-
-        %% Correlation and Data
-        CorrelationEngine["Azure Functions / Stream Analytics<br/>(Event Linker)"]
-        CosmosDB[("Azure Cosmos DB<br/>(Compliance State Document)")]
-        LogAnalytics[("Azure Data Explorer / Log Analytics<br/>(Audit Telemetry)")]
+    %% Logical Layers in Azure
+    subgraph Layer1 ["1. Ingestion Layer"]
+        Gateway["Azure API Management / Function (Webhook Gateway)"]
     end
 
-    %% Main Transactional Flow
-    Gateway -- "Publish (CloudEvent)" --> ServiceBus
-    ServiceBus -- "Trigger" --> Orchestrator
-    
-    Orchestrator <--> Context
-    Context <--> ExternalAPIs
-    
-    Orchestrator <--> OPA
-    Orchestrator --> ActionDispatcher
-    ActionDispatcher -. "Enforce Rule" .-> GH
+    subgraph Layer2 ["2. Messaging Layer"]
+        ServiceBus[["Azure Service Bus (Transactional Topics)"]]
+        EventHubs[["Azure Event Hubs (Data Streaming)"]]
+    end
 
-    %% Correlation Flow
-    EventHubs -- "Consume" --> CorrelationEngine
-    CorrelationEngine -- "Update State (By SHA)" --> CosmosDB
-    Context -. "Query Historical State" .-> CosmosDB
+    subgraph Layer3 ["3. Decision Core Layer"]
+        Orchestrator["Azure Durable Functions (Policy Orchestrator)"]
+        Context["Azure Functions (Context Provider)"]
+        OPA["Azure Container Apps (OPA Engine)"]
+    end
+
+    subgraph Layer4 ["4. Enforcement Layer"]
+        ActionDispatcher["Azure Functions (Action Dispatcher)"]
+    end
+
+    subgraph Layer5 ["5. Observability & Data Layer"]
+        CorrelationEngine["Azure Functions / Stream Analytics (Event Linker)"]
+        CosmosDB[("Azure Cosmos DB (Compliance State Document)")]
+        LogAnalytics[("Azure Data Explorer / Log Analytics (Audit Telemetry)")]
+    end
+
+    %% Flows
+    GH -->|"HTTPS"| Gateway
+    Gateway -->|"Publish (CloudEvent)"| ServiceBus
+    ServiceBus -->|"Trigger"| Orchestrator
     
-    %% Audit Flow
-    Gateway -. "Log Raw Webhooks" .-> EventHubs
-    Orchestrator -. "Log Audit & Decisions" .-> EventHubs
-    EventHubs -- "Ingest" --> LogAnalytics
+    Orchestrator <-->|"Enrich"| Context
+    Context <-->|"Query"| ExternalAPIs
+    Orchestrator <-->|"Evaluate"| OPA
+    
+    Orchestrator -->|"Dispatch"| ActionDispatcher
+    ActionDispatcher -.->|"Enforce Rule"| GH
+
+    EventHubs -->|"Consume"| CorrelationEngine
+    CorrelationEngine -->|"Update State (By SHA)"| CosmosDB
+    Context -.->|"Query Historical State"| CosmosDB
+    
+    Gateway -.->|"Log Raw Webhooks"| EventHubs
+    Orchestrator -.->|"Log Audit & Decisions"| EventHubs
+    EventHubs -->|"Ingest"| LogAnalytics
 ```
 
 ### 2.4. Local Development & Integration Testing (Docker Compose)
-
-To maintain an agile local development cycle, the cloud architecture is emulated using lightweight containers and mock implementations.
+To maintain an agile local development cycle, the layered cloud architecture is emulated using lightweight containers and mock implementations.
 
 ```mermaid
 flowchart TD
-    GH["GitHub Webhook"] -- "Internet" --> Smee["smee.io"]
-    Smee -- "Forward" --> SmeeClient["Smee Client Container"]
+    GH["GitHub Webhook"]
+    Smee["smee.io"]
+    MockAPI["Mock ITSM / API (WireMock)"]
+    
+    GH -->|"Internet"| Smee
 
-    subgraph Local_Docker_Compose [Local Event-Driven Stack]
-        Gateway["Gateway<br/>(FastAPI)"]
-        EventBus[["Broker<br/>(RabbitMQ / Redis)"]]
+    subgraph Local_Docker_Compose ["Local Event-Driven Stack"]
+        SmeeClient["Smee Client Container"]
         
-        WorkerCore["Core Workers<br/>(Python Celery / FastStream)"]
-        Context["Context Provider<br/>(Python Module)"]
-        Engine["Policy Engine<br/>(OPA Container)"]
-        Dispatcher["Action Dispatcher<br/>(Python Module)"]
-        
-        DB[("Event Store<br/>(PostgreSQL Container)")]
+        subgraph Layer1 ["1. Ingestion Layer"]
+            Gateway["FastAPI Gateway"]
+        end
+
+        subgraph Layer2 ["2. Messaging Layer"]
+            EventBus[["RabbitMQ / Redis Broker"]]
+        end
+
+        subgraph Layer3 ["3. Decision Core Layer"]
+            Orchestrator["Python Worker (Celery/FastStream)"]
+            Context["Python Module (Context Provider)"]
+            Engine["OPA Container"]
+        end
+
+        subgraph Layer4 ["4. Enforcement Layer"]
+            Dispatcher["Python Module (Action Dispatcher)"]
+        end
+
+        subgraph Layer5 ["5. Observability Layer"]
+            DB[("PostgreSQL Container (Event Store)")]
+        end
     end
     
-    MockAPI["Mock ITSM / API<br/>(WireMock / Mountebank)"]
-
-    SmeeClient --> Gateway
-    Gateway -- "Publish" --> EventBus
-    EventBus -- "Consume" --> WorkerCore
+    %% Flows
+    Smee -->|"Forward"| SmeeClient
+    SmeeClient -->|"Payload"| Gateway
+    Gateway -->|"Publish"| EventBus
+    EventBus -->|"Consume"| Orchestrator
     
-    WorkerCore <--> Context
-    Context <--> MockAPI
+    Orchestrator <-->|"Enrich"| Context
+    Context <-->|"Query"| MockAPI
+    Orchestrator <-->|"Evaluate"| Engine
     
-    WorkerCore <--> Engine
-    WorkerCore --> Dispatcher
-    Dispatcher -. "Mock API Call" .-> GH
+    Orchestrator -->|"Dispatch"| Dispatcher
+    Dispatcher -.->|"Mock API Call"| GH
     
-    WorkerCore --> DB
+    Orchestrator -->|"Log Data"| DB
 ```
 
 ---
@@ -244,12 +254,12 @@ flowchart TD
 ## Consequences
 
 * **Pros:**
-  * **Technology Agnostic:** Core logic is insulated from specific tools; components can be swapped with minimal impact.
+  * **Technology Agnostic:** Core logic is insulated from specific tools; components can be swapped with minimal impact due to strict layer separation.
   * **Highly Scalable:** Asynchronous processing prevents bottlenecks during high loads or slow external API responses.
-  * **Extensible Context:** Easily handles complex policies like Release Gates by plugging new data sources into the Context Provider.
-  * **Robust Auditing:** The Event Store and Correlation Engine provide a single source of truth for compliance reporting and historical event lineage.
-  * **Cost-Effective (Azure):** Utilizing a fully Serverless stack (Functions, Container Apps) scales to zero and eliminates the overhead of managing underlying infrastructure like Kubernetes.
+  * **Extensible Context:** Easily handles complex policies like Release Gates by plugging new data sources into the Context Provider within the Decision Core.
+  * **Robust Auditing:** The Observability Layer provides a single source of truth for compliance reporting and historical event lineage without impacting transactional performance.
+  * **Cost-Effective (Azure):** Utilizing a fully Serverless stack scales to zero and eliminates the overhead of managing underlying infrastructure.
 * **Cons:**
-  * **Increased Architecture Complexity:** Requires deploying and maintaining multiple components (Broker, Streaming Hub, Orchestrator) compared to a simple synchronous API.
+  * **Increased Architecture Complexity:** Requires deploying and maintaining multiple components across layers compared to a simple synchronous API.
   * **Tracing Difficulty:** Troubleshooting requires robust distributed tracing (e.g., correlation IDs) as requests flow asynchronously through queues.
   * **Eventual Consistency:** External platform updates (like GitHub checks) are not strictly synchronous with the initial webhook trigger.
