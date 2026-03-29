@@ -2,54 +2,28 @@ package github.pullrequest_test
 
 import rego.v1
 
+import data.github.fixtures as fixtures
 import data.github.pullrequest as pr
 
 # =============================================================================
 #  Tests for the pull request policy (github.pullrequest)
 # =============================================================================
 
-base_policy := {"policy": {
-	"version": "1.0",
-	"branch_rules": [
-		{"source": "feature/*", "target": "develop"},
-		{"source": "feature/*", "target": "main"},
-		{"source": "bugfix/*", "target": "develop"},
-		{"source": "hotfix/*", "target": "main"},
-		{"source": "release/*", "target": "main"},
-		{"source": "develop", "target": "main"},
-	],
-	"rules": {
-		"allowed_target_branches": ["main", "develop"],
-		"approvals_required": 1,
-		"signed_off": false,
-	},
-}}
-
 # ── Basic rules tests ────────────────────────────────────────────────────────
 
 test_allow_valid_pr if {
-	test_input := {
-		"head_ref": "feature/login",
-		"base_ref": "develop",
-		"repo_policy": base_policy,
-		"workflow_meta": {
-			"approvers": ["erasmo"],
-			"signed_off": false,
-		},
-	}
+	test_input := fixtures.build_pr_input("feature/login", "develop", ["erasmo"], false, fixtures.base_policy)
 	pr.allow with input as test_input
 }
 
 test_deny_target_branch_not_allowed if {
-	test_input := {
-		"head_ref": "feature/abc",
-		"base_ref": "staging",
-		"repo_policy": base_policy,
-		"workflow_meta": {
-			"approvers": ["erasmo"],
-			"signed_off": false,
-		},
-	}
+	test_input := fixtures.build_pr_input(
+		"feature/abc",
+		"staging",
+		["erasmo"],
+		false,
+		fixtures.base_policy,
+	)
 	not pr.allow with input as test_input
 	vs := pr.target_branch_violations with input as test_input
 	count(vs) == 1

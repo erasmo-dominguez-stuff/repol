@@ -5,6 +5,7 @@ local development setup (OPA on localhost, no GitHub App, no DB path).
 For production, every setting without a safe default is left as an empty string
 so that missing config fails loudly at the first call site rather than silently.
 """
+#TODO what is the best way to manage configuration in a hexagonal architecture? Should I have a separate config for each adapter (e.g. github_config, opa_config, audit_config) or is it acceptable to have a single config file with all settings?
 
 import os
 from pathlib import Path

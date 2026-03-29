@@ -1,0 +1,7 @@
+# Regal configuration file for OPA policies
+# See: https://docs.regal.sh/latest/configuration/
+extends = ["recommended"]
+ignore = [
+  "tests/*.rego",
+  "tests/fixtures.rego"
+] 

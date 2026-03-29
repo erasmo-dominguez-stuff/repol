@@ -32,4 +32,4 @@ Homepage = "https://github.com/erasmo-dominguez-stuff/gitpoli"
 Issues = "https://github.com/erasmo-dominguez-stuff/gitpoli/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = []
+packages = ["src/app"]

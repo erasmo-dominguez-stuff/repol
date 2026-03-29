@@ -5,6 +5,9 @@ so each router only calls ``record_audit`` and gets a fully populated
 response dict back.
 """
 
+
+#TODO: Move this code to audit.py and make it a method on the AuditTrail class, e.g. ``audit_trail.record_and_format(...)``.
+
 import logging
 
 from fastapi import Request

@@ -15,7 +15,8 @@ Private key sources (in order of preference):
   GITHUB_APP_PRIVATE_KEY      — raw PEM content (cloud envs, e.g. Azure secrets)
 """
 
-import logging
+#TODO if this is a Github client and if I want to follow a Hexagonal architecture, should be stored in a separate folder like clients or any other terminology used for hex
+
 import time
 from typing import Optional
 

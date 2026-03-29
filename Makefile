@@ -58,6 +58,9 @@ eval-pr: ## Evaluate PR policy with sample input
 install-opa: ## Install OPA CLI (macOS)
 	brew install opa
 
+install-opa-regal: ## Install OPA Regal linter (macOS)
+	brew install regal
+	
 install-check-jsonschema: ## Install check-jsonschema for full schema validation
 	pip install check-jsonschema
 
