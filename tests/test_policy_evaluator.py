@@ -1,6 +1,5 @@
 import pytest
-import asyncio
-from infra.server.app.adapters.opa_http_client import OPAHttpClient
+from app.adapters.opa_http_client import OPAHttpClient
 
 @pytest.mark.asyncio
 async def test_policy_evaluator_returns_result():

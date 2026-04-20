@@ -19,6 +19,8 @@ Routes:
     POST /webhook/pull_request_review       — direct, for review submitted/dismissed
 """
 from ..handlers import get_handler
+from ..handlers import deploy as _deploy_handler  # noqa: F401
+from ..handlers import pull_request as _pull_request_handler  # noqa: F401
 
 import hashlib
 import hmac
@@ -26,16 +28,71 @@ import json
 import logging
 import secrets
 
-import yaml
 from fastapi import APIRouter, HTTPException, Request
 
-from ..config import PR_FORCE_APPROVERS, REPOL_DIR, WEBHOOK_SECRET
-from ..github import get_pr_approvers, github_callback, github_check_run
-from ..helpers import record_audit
-from ..opa import query_opa
+from ..config import WEBHOOK_SECRET
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/webhook", tags=["webhook"])
 
-# ...existing code for helpers and endpoints...
+def _verify_signature(request_body: bytes, signature_header: str) -> None:
+    if not WEBHOOK_SECRET:
+        logger.warning("WEBHOOK_SECRET not configured; signature verification skipped.")
+        return
+    if not signature_header:
+        raise HTTPException(status_code=401, detail="Missing X-Hub-Signature-256 header")
+    expected = "sha256=" + hmac.new(
+        WEBHOOK_SECRET.encode("utf-8"), request_body, hashlib.sha256
+    ).hexdigest()
+    if not secrets.compare_digest(expected, signature_header):
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+
+async def _parse_event(request: Request) -> tuple[str, dict]:
+    raw = await request.body()
+    _verify_signature(raw, request.headers.get("X-Hub-Signature-256", ""))
+    event_name = request.headers.get("X-GitHub-Event", "")
+    if not event_name:
+        raise HTTPException(status_code=400, detail="Missing X-GitHub-Event header")
+    try:
+        payload = json.loads(raw.decode("utf-8") or "{}")
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
+    return event_name, payload
+
+
+@router.post("")
+async def webhook_dispatch(request: Request):
+    event_name, payload = await _parse_event(request)
+    handler = get_handler(event_name)
+    if not handler:
+        return {"ok": True, "ignored": True, "event": event_name}
+    return await handler(request, payload)
+
+
+@router.post("/deployment_protection_rule")
+async def deployment_protection_rule(request: Request):
+    _, payload = await _parse_event(request)
+    handler = get_handler("deployment_protection_rule")
+    if not handler:
+        raise HTTPException(status_code=500, detail="Handler not registered")
+    return await handler(request, payload)
+
+
+@router.post("/pull_request")
+async def pull_request(request: Request):
+    _, payload = await _parse_event(request)
+    handler = get_handler("pull_request")
+    if not handler:
+        raise HTTPException(status_code=500, detail="Handler not registered")
+    return await handler(request, payload)
+
+
+@router.post("/pull_request_review")
+async def pull_request_review(request: Request):
+    _, payload = await _parse_event(request)
+    handler = get_handler("pull_request_review")
+    if not handler:
+        raise HTTPException(status_code=500, detail="Handler not registered")
+    return await handler(request, payload)

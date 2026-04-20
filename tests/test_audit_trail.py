@@ -1,4 +1,4 @@
-from infra.server.app.adapters.sqlite_audit_trail import SQLiteAuditTrail
+from app.adapters.sqlite_audit_trail import SQLiteAuditTrail
 
 def test_audit_trail_record_and_query():
     audit = SQLiteAuditTrail()

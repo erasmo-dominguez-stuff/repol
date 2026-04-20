@@ -33,6 +33,7 @@ logs/
 # Test outputs
 test-results/
 coverage-reports/
+.data/
 
 # Environment files
 .env

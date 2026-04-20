@@ -15,10 +15,10 @@ Run the policy server and OPA locally to test Pull Request and Deployment Protec
 
 ## Server Structure
 
-The policy server is a modular FastAPI app shared at `infra/server/app/`:
+The policy server is a modular FastAPI app shared at `src/app/`:
 
 ```
-infra/server/app/
+src/app/
 ├── __init__.py          # App assembly (creates FastAPI, includes routers)
 ├── config.py            # Settings (OPA_URL, REPOL_DIR, GitHub App credentials)
 ├── opa.py               # OPA REST client

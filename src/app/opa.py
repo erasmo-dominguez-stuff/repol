@@ -38,5 +38,15 @@ async def query_opa(package: str, input_data: dict) -> dict:
     except httpx.RequestError as exc:
         # Network-level failure (DNS, connection refused, timeout, etc.)
         raise HTTPException(status_code=502, detail=f"OPA unreachable: {exc}") from exc
-    # ...existing code for response parsing...
-    return {}
+
+    if resp.status_code != 200:
+        raise HTTPException(
+            status_code=502, detail=f"OPA returned {resp.status_code}: {resp.text}"
+        )
+
+    try:
+        payload = resp.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail="OPA returned invalid JSON") from exc
+
+    return payload.get("result", {})

@@ -1,4 +1,4 @@
-from infra.server.app.core.handler_registry import HandlerRegistry
+from app.core.handler_registry import HandlerRegistry
 
 def test_handler_registry_register_and_get():
     registry = HandlerRegistry()

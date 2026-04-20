@@ -84,7 +84,7 @@ This pattern ensures the codebase is modular, testable, and easy to extend for n
 
 ## Adding a New Policy (SOLID/Hexagonal Architecture)
 
-1. Create a handler module in `infra/server/app/handlers/` (e.g. `my_policy.py`).
+1. Create a handler module in `src/app/handlers/` (e.g. `my_policy.py`).
 2. Implement a handler class or function:
    ```python
    from ..handlers import register_handler

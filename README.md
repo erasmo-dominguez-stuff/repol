@@ -28,6 +28,14 @@ gitpoli lets platform and security teams define, test, and enforce deployment an
 
 ---
 
+## Documentation status
+
+- **Current state (implemented now):** `src/app` FastAPI service + OPA + SQLite audit (`infra/local` and `infra/integration`).
+- **Target / roadmap:** Azure-like topology and Cosmos-backed audit are described in dedicated sections and `infra/az-integration/`.
+- If a section does not explicitly say target/roadmap, read it as current behavior.
+
+---
+
 ## How It Works
 
 Each policy follows the same pattern:
@@ -70,7 +78,7 @@ flowchart TD
 ```
 
 
-#### Integration Stack (with smee, Cosmos DB)
+#### Integration Stack (with smee, SQLite)
 
 ```mermaid
 flowchart TD
@@ -79,12 +87,12 @@ flowchart TD
   Server["FastAPI Policy Server"]
   OPA["OPA (Rego)"]
   subgraph DB
-    Cosmos["Cosmos DB"]
+    SQLite["SQLite DB"]
   end
   GH -- "Webhook" --> Smee
   Smee -- "POST /webhook" --> Server
   Server -- "REST" --> OPA
-  Server -- "Audit" --> Cosmos
+  Server -- "Audit" --> SQLite
   OPA -- "Decision" --> Server
   Server -- "GitHub API" --> GH
 ```
@@ -99,7 +107,7 @@ flowchart TD
   Func["Azure Functions (FastAPI)"]
   OPA["OPA (Rego)"]
   subgraph DB
-    Cosmos["Cosmos DB"]
+    SQLite["SQLite DB"]
   end
   GH -- "Webhook" --> App
   App -- "POST /webhook" --> Func
@@ -192,7 +200,6 @@ flowchart TD
  ┌──────────────────────────────┐
  │  GitHub Actions              │
  │  ├─ policy-check.yml         │   opa check + opa test + schema validate
- │  └─ reusable-pr-check.yml    │   eval-policy action → allow/deny
  └──────────────────────────────┘
            │
            ▼
@@ -240,7 +247,6 @@ Both policies share common helper functions in `policies/lib/helpers.rego`.
   workflows/
     policy-check.yml         # CI: lint + test on push/PR
     policy-docker-ci.yml     # CI: build Docker image for server
-    reusable-pr-check.yml    # Reusable: evaluate PR policy
     reusable-deploy-check.yml# Reusable: evaluate deploy policy
     test-deploy.yml          # Manual: trigger test deployment
     policy-release.yml       # Release: publish OPA bundle
@@ -249,16 +255,11 @@ Both policies share common helper functions in `policies/lib/helpers.rego`.
   deploy.yaml                # Deploy rules per environment (prod, staging, dev)
 infra/
   local/                     # Local testing (Docker Compose: OPA + server)
-  integration/               # Integration testing with real GitHub webhooks
-  server/                    # Shared FastAPI server
-    app/
-      handlers/              # Modular policy handlers (extensible registry)
-        __init__.py          # Handler registry (explicit)
-        pull_request.py      # PR policy handler
-        deploy.py            # Deploy policy handler
-      routers/               # API routers (webhook, audit, health)
-      ...                    # Core modules (github, opa, audit, helpers)
-  smee/                      # smee.io relay container (webhook tunnel)
+  integration/               # Integration testing with real GitHub webhooks (includes smee container)
+src/
+  app/                       # FastAPI service code
+    handlers/                # Modular policy handlers (extensible registry)
+    routers/                 # API routers (webhook, audit, health, evaluate)
 policies/
   lib/helpers.rego           # Shared helper functions
   pullrequest.rego           # PR policy (Rego v1)
@@ -273,7 +274,7 @@ Makefile                     # All dev, test, and infra commands
 
 Policy evaluation logic is now fully modular and extensible:
 
-- Each event type (e.g. `pull_request`, `deployment_protection_rule`) has a dedicated handler module in `infra/server/app/handlers/`.
+- Each event type (e.g. `pull_request`, `deployment_protection_rule`) has a dedicated handler module in `src/app/handlers/`.
 - The handler registry in `handlers/__init__.py` allows explicit registration and dispatch.
 - To add a new policy, create a handler module and register it in the registry.
 - The main webhook dispatcher (`routers/webhook.py`) routes events to the registry, making it easy to evolve and extend.
